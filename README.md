@@ -14,6 +14,7 @@ Una app móvil con cuentas, presupuesto, reportes, temas, sincronización bancar
 - SHA-256: `76DBA2754BEB0F89F07253CEEBF09D91ABDD7D73B4B905E0F7F4D1AA244AF9AE`
 - Cada compañero instala el APK y usa su propia libreta local; no incluye tu token ni tus datos.
 - Android puede mostrar un aviso de “app no verificada” por no venir de Play Store. Es normal: permite la instalación desde esa fuente.
+- **GitHub y descargas:** https://github.com/joseestebanmarinrincones-dot/sapardobank/releases/latest
 
 ---
 
