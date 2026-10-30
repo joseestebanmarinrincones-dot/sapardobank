@@ -1,7 +1,7 @@
-"""Datos iniciales de demostración.
+"""Datos de arranque y datos de demostración (opt-in).
 
-No son datos reales: sirven para que la app se sienta viva desde el primer
-arranque y para probar el feed en tiempo real sin conectar un banco.
+La app arranca vacía: solo categorías, presupuesto y una cuenta de efectivo.
+Los datos demo se cargan únicamente cuando el usuario lo pide.
 """
 
 from __future__ import annotations
@@ -26,64 +26,112 @@ DEMO_ACCOUNT_ID = "acc_demo_bbva"
 CASH_ACCOUNT_ID = "acc_cash"
 
 
-def ensure_demo_accounts(ledger) -> None:
+def ensure_demo_account(ledger) -> None:
+    """Crea la cuenta BBVA de demostración si no existe."""
+    if ledger.account(DEMO_ACCOUNT_ID):
+        return
+    ledger.db.execute(
+        """INSERT INTO accounts
+        (id, name, institution, kind, currency, initial_balance_cents, balance_cents,
+         color, icon, provider, provider_ref, last_sync_at, is_demo, is_archived, created_at)
+        VALUES (?, ?, ?, ?, ?, 0, NULL, ?, ?, 'demo', 'demo-checking', NULL, 1, 0, ?)""",
+        (
+            DEMO_ACCOUNT_ID, "Débito BBVA (demo)", "BBVA", "debit", "MXN",
+            "#146EF5", "ACCOUNT_BALANCE_WALLET_ROUNDED", now_iso(),
+        ),
+    )
+
+
+def seed_initial(ledger) -> bool:
+    """Arranque limpio: sin movimientos demo, con una cuenta de efectivo."""
+    db: Database = ledger.db
+    ledger.ensure_categories()
+
+    # Migración única: si una versión anterior dejó datos demo, los retiramos
+    # y apagamos el feed. No toca movimientos manuales ni de bancos reales.
+    if get_setting(db, "clean_start_done", "0") != "1":
+        db.execute(
+            "DELETE FROM transactions WHERE source = 'demo' OR account_id LIKE 'acc_demo%'"
+        )
+        db.execute("DELETE FROM accounts WHERE is_demo = 1")
+        set_setting(db, "clean_start_done", "1")
+        set_setting(db, "demo_live", "0")
+
     if not ledger.accounts(include_archived=True):
-        now = now_iso()
-        ledger.db.execute(
-            """INSERT INTO accounts
-            (id, name, institution, kind, currency, initial_balance_cents, balance_cents,
-             color, icon, provider, provider_ref, last_sync_at, is_demo, is_archived, created_at)
-            VALUES (?, ?, ?, ?, ?, 0, NULL, ?, ?, 'demo', 'demo-checking', NULL, 1, 0, ?)""",
-            (
-                DEMO_ACCOUNT_ID, "Débito BBVA", "BBVA", "debit", "MXN",
-                "#146EF5", "ACCOUNT_BALANCE_WALLET_ROUNDED", now,
-            ),
+        ledger.create_account(
+            "Mi efectivo",
+            institution="En tu bolsillo",
+            kind="cash",
+            initial_balance_cents=0,
+            color="#D9883A",
+            icon="PAYMENTS_ROUNDED",
+            provider="cash",
         )
-        ledger.db.execute(
-            """INSERT INTO accounts
-            (id, name, institution, kind, currency, initial_balance_cents, balance_cents,
-             color, icon, provider, provider_ref, last_sync_at, is_demo, is_archived, created_at)
-            VALUES (?, ?, ?, ?, ?, 0, NULL, ?, ?, 'cash', NULL, NULL, 0, 0, ?)""",
-            (
-                CASH_ACCOUNT_ID, "Efectivo", "En tu bolsillo", "cash", "MXN",
-                "#D9883A", "PAYMENTS_ROUNDED", now,
-            ),
-        )
+
+    set_setting(db, "seeded", "1")
+    if not get_setting(db, "daily_budget_cents", ""):
+        set_setting(db, "daily_budget_cents", "45000")
+    return True
 
 
 DEMO_MOVEMENTS = [
-    # offset_days, hora, minuto, cuenta, monto, descripción, categoría, comercio, origen
-    (-6, 9, 15, DEMO_ACCOUNT_ID, -68000, "Súper de la semana", "groceries", "Soriana", "demo"),
-    (-6, 14, 5, DEMO_ACCOUNT_ID, -14500, "Comida con equipo", "food", "La Cocina de Ana", "demo"),
-    (-5, 8, 40, DEMO_ACCOUNT_ID, -4800, "Café y concha", "coffee", "Café Central", "demo"),
-    (-5, 19, 20, CASH_ACCOUNT_ID, -9500, "Tacos al pastor", "food", "El Pastorcito", "manual"),
-    (-4, 10, 30, DEMO_ACCOUNT_ID, -32000, "Gasolina", "transport", "Pemex", "demo"),
-    (-4, 13, 10, DEMO_ACCOUNT_ID, -11000, "Comida corrida", "food", "Fonda Doña Mari", "demo"),
-    (-3, 7, 55, DEMO_ACCOUNT_ID, -5500, "Café para llevar", "coffee", "Starbucks", "demo"),
-    (-3, 16, 40, DEMO_ACCOUNT_ID, -24900, "Tenis para correr", "shopping", "Nike", "demo"),
-    (-2, 9, 5, DEMO_ACCOUNT_ID, -18500, "Súper express", "groceries", "Oxxo", "demo"),
-    (-2, 15, 25, DEMO_ACCOUNT_ID, -12900, "Cine + palomitas", "fun", "Cinepolis", "demo"),
-    (-1, 8, 10, DEMO_ACCOUNT_ID, -4500, "Americano", "coffee", "Café Central", "demo"),
-    (-1, 11, 30, DEMO_ACCOUNT_ID, -23000, "Súper", "groceries", "La Comer", "demo"),
-    (-1, 18, 15, CASH_ACCOUNT_ID, -15000, "Flores para casa", "home", "Mercado", "manual"),
-    (0, 9, 10, DEMO_ACCOUNT_ID, -3500, "Café de olla", "coffee", "Café Central", "demo"),
-    (0, 13, 45, DEMO_ACCOUNT_ID, -12500, "Comida corrida", "food", "Fonda Doña Mari", "demo"),
-    (0, 18, 20, DEMO_ACCOUNT_ID, -42500, "Despensa del día", "groceries", "Soriana", "demo"),
+    # offset_days, hora, minuto, monto, descripción, categoría, comercio
+    (-6, 9, 15, -68000, "Súper de la semana", "groceries", "Soriana"),
+    (-6, 14, 5, -14500, "Comida con equipo", "food", "La Cocina de Ana"),
+    (-5, 8, 40, -4800, "Café y concha", "coffee", "Café Central"),
+    (-5, 19, 20, -9500, "Tacos al pastor", "food", "El Pastorcito"),
+    (-4, 10, 30, -32000, "Gasolina", "transport", "Pemex"),
+    (-4, 13, 10, -11000, "Comida corrida", "food", "Fonda Doña Mari"),
+    (-3, 7, 55, -5500, "Café para llevar", "coffee", "Starbucks"),
+    (-3, 16, 40, -24900, "Tenis para correr", "shopping", "Nike"),
+    (-2, 9, 5, -18500, "Súper express", "groceries", "Oxxo"),
+    (-2, 15, 25, -12900, "Cine + palomitas", "fun", "Cinepolis"),
+    (-1, 8, 10, -4500, "Americano", "coffee", "Café Central"),
+    (-1, 11, 30, -23000, "Súper", "groceries", "La Comer"),
+    (-1, 18, 15, -15000, "Flores para casa", "home", "Mercado"),
+    (0, 9, 10, -3500, "Café de olla", "coffee", "Café Central"),
+    (0, 13, 45, -12500, "Comida corrida", "food", "Fonda Doña Mari"),
+    (0, 18, 20, -42500, "Despensa del día", "groceries", "Soriana"),
 ]
 
 
-def seed_demo_data(ledger, target_balances: dict[str, int] | None = None) -> bool:
-    """Siembra categorías, cuentas y movimientos. Devuelve True si sembró."""
+def load_demo_data(ledger, target_balances: dict[str, int] | None = None) -> bool:
+    """Carga o recarga la demo sin borrar las cuentas reales del usuario."""
     db: Database = ledger.db
     ledger.ensure_categories()
-    ensure_demo_accounts(ledger)
+    # Solo eliminamos lo que pertenece a la demo.
+    db.execute(
+        "DELETE FROM transactions WHERE source = 'demo' OR account_id LIKE 'acc_demo%'"
+    )
+    db.execute("DELETE FROM accounts WHERE is_demo = 1")
+    ensure_demo_account(ledger)
+    _insert_demo_movements(ledger)
+    _set_demo_balances(ledger, target_balances)
+    set_setting(db, "seeded", "1")
+    set_setting(db, "clean_start_done", "1")
+    set_setting(db, "demo_live", "1")
+    ledger.log_sync("demo", "ok", "Datos de demostración cargados", ledger.count_transactions())
+    return True
 
+
+def seed_demo_data(ledger, target_balances: dict[str, int] | None = None) -> bool:
+    """Compatibilidad con pruebas y arranques antiguos: siembra si está vacío."""
+    db: Database = ledger.db
+    ledger.ensure_categories()
+    ensure_demo_account(ledger)
     if get_setting(db, "seeded", "0") == "1" or ledger.count_transactions() > 0:
         set_setting(db, "seeded", "1")
         return False
+    _insert_demo_movements(ledger)
+    _set_demo_balances(ledger, target_balances)
+    set_setting(db, "seeded", "1")
+    set_setting(db, "demo_live", "1")
+    set_setting(db, "daily_budget_cents", "45000")
+    ledger.log_sync("demo", "ok", "Datos de ejemplo cargados", ledger.count_transactions())
+    return True
 
-    # Dos movimientos recientes relativos a la hora actual para que "Hoy" no
-    # aparezca vacío al abrir la app por primera vez.
+
+def _insert_demo_movements(ledger) -> None:
     ledger.add_transaction(
         account_id=DEMO_ACCOUNT_ID,
         amount_cents=-4200,
@@ -104,24 +152,19 @@ def seed_demo_data(ledger, target_balances: dict[str, int] | None = None) -> boo
         source="demo",
         external_id="demo_seed_today_2",
     )
-
-    for offset, hour, minute, account_id, amount, description, category_id, merchant, source in DEMO_MOVEMENTS:
-        occurred = _at(offset, hour, minute)
-        # Evita duplicar los dos movimientos recientes de hoy.
+    for offset, hour, minute, amount, description, category_id, merchant in DEMO_MOVEMENTS:
         if offset == 0:
             continue
         ledger.add_transaction(
-            account_id=account_id,
+            account_id=DEMO_ACCOUNT_ID,
             amount_cents=amount,
             description=description,
             category_id=category_id,
             merchant=merchant,
-            occurred_at=occurred,
-            source=source,
-            external_id=f"seed_{offset}_{hour}_{minute}_{account_id}" if source == "demo" else None,
+            occurred_at=_at(offset, hour, minute),
+            source="demo",
+            external_id=f"seed_{offset}_{hour}_{minute}_{category_id}",
         )
-
-    # Un ingreso para que el libro no sea solo de salidas.
     ledger.add_transaction(
         account_id=DEMO_ACCOUNT_ID,
         amount_cents=380000,
@@ -133,9 +176,10 @@ def seed_demo_data(ledger, target_balances: dict[str, int] | None = None) -> boo
         external_id="demo_seed_income_1",
     )
 
-    # Ajusta el saldo inicial para que las cuentas demo muestren un saldo
-    # realista después de todo el historial anterior.
-    targets = target_balances or {DEMO_ACCOUNT_ID: 1845000, CASH_ACCOUNT_ID: 125000}
+
+def _set_demo_balances(ledger, target_balances: dict[str, int] | None = None) -> None:
+    db = ledger.db
+    targets = target_balances or {DEMO_ACCOUNT_ID: 1845000}
     for account_id, target in targets.items():
         account: Account | None = ledger.account(account_id)
         if not account:
@@ -150,9 +194,3 @@ def seed_demo_data(ledger, target_balances: dict[str, int] | None = None) -> boo
             initial_balance_cents=int(target) - int(net),
             last_sync_at=now_iso(),
         )
-
-    set_setting(db, "seeded", "1")
-    set_setting(db, "demo_live", "1")
-    set_setting(db, "daily_budget_cents", "45000")
-    ledger.log_sync("demo", "ok", "Datos de ejemplo cargados", ledger.count_transactions())
-    return True

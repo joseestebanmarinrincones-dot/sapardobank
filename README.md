@@ -7,13 +7,16 @@ Una app móvil con cuentas, presupuesto, reportes, temas, sincronización bancar
 
 ## APK listo para compartir
 
-**`dist/Sapardobank-1.0.0.apk`** (también copiado en tu Escritorio como `Sapardobank-1.0.0.apk`).
+**`dist/Sapardobank-1.1.0.apk`** (también copiado en tu Escritorio como `Sapardobank-1.1.0.apk`).
 
-- Versión 1.0.0 · Android 7+ (minSdk 24) · universal (arm64-v8a, armeabi-v7a, x86_64).
+- Versión 1.1.0 · Android 7+ (minSdk 24) · universal (arm64-v8a, armeabi-v7a, x86_64).
 - Tamaño: 148.7 MB · Firma **debug** (instalable fuera de Play Store).
-- SHA-256: `76DBA2754BEB0F89F07253CEEBF09D91ABDD7D73B4B905E0F7F4D1AA244AF9AE`
+- SHA-256: `427363EA90C7DDB88BA8025A05F29C6D62D8995D29CE6A41ACD79C5605C6DA3F`
 - Cada compañero instala el APK y usa su propia libreta local; no incluye tu token ni tus datos.
 - Android puede mostrar un aviso de “app no verificada” por no venir de Play Store. Es normal: permite la instalación desde esa fuente.
+- **Arranque limpio:** no se cargan gastos demo al abrir; solo una cuenta “Mi efectivo” en cero. La demo se activa manualmente.
+- **Conexión a casa:** Ajustes → Conexión → Conectar a mi casa. Pide permiso de red y busca el servidor en tu Wi-Fi.
+- **Avisos de actualización:** si hay una versión nueva en GitHub, aparece un pop-up con botón Descargar.
 - **GitHub y descargas:** https://github.com/joseestebanmarinrincones-dot/sapardobank/releases/latest
 
 ---
@@ -23,7 +26,7 @@ Una app móvil con cuentas, presupuesto, reportes, temas, sincronización bancar
 La primera vez que se abre Sapardobank aparece un tutorial de **4 pasos** para conectar internet y el banco, con botones **Atrás**, **Siguiente** y **Saltar**:
 
 1. Qué se necesita y cómo probar el modo demo.
-2. Dónde pegar la URL HTTPS y el token del servidor.
+2. Cómo buscar el servidor en el Wi-Fi de casa y pegar el token.
 3. Cómo vincular el banco con Plaid, Belvo o webhook.
 4. Cómo sincronizar y ver los gastos en el widget.
 
@@ -42,7 +45,7 @@ Puedes repetirlo cuando quieras en **Ajustes → Conexión → Tutorial**.
 - **Widget nativo Android:** gasto de hoy, presupuesto y último movimiento en la pantalla de inicio.
 - **Modo demostración:** genera compras simuladas en tiempo real sin conectar un banco.
 - **Backend opcional:** sincronización, SSE, Plaid y webhooks firmados.
-- **Firewall de red:** HTTPS obligatorio, allowlist de salida, bloqueo de IP privadas, rate limiting, token y HMAC.
+- **Firewall de red:** HTTPS en internet, HTTP solo LAN, allowlist de salida, bloqueo de IP privadas, rate limiting, token y HMAC.
 
 ---
 
@@ -62,7 +65,7 @@ python -m venv .venv
 .venv\Scripts\python main.py
 ```
 
-En el primer arranque se cargan datos de ejemplo (marcados como demo). Puedes desactivar el feed desde **Cuentas** o **Ajustes**.
+En el primer arranque la libreta está **vacía**: solo verás la cuenta “Mi efectivo” en cero. La demostración se carga manualmente desde **Ajustes → Datos → Cargar demostración** o activando **Modo demostración**.
 
 Para desarrollar con recarga en caliente:
 
@@ -96,7 +99,7 @@ El proyecto usa una **plantilla Android propia** (`android_template/`) que añad
 
 - `LibretaWidgetProvider.kt` (widget nativo con `RemoteViews`).
 - Layout, fondo, progreso y recursos del widget.
-- Permiso `INTERNET` y `usesCleartextTraffic="false"`.
+- Permiso `INTERNET` y `usesCleartextTraffic="true"` (la app solo permite HTTP hacia la red local; internet sigue exigiendo HTTPS).
 - Receiver registrado en `AndroidManifest.xml`.
 
 La plantilla está fijada a **Flet 1.0.5**. Si actualizas Flet, vuelve a generar `android_template/` desde la plantilla oficial y reaplica los archivos del widget.
@@ -113,7 +116,7 @@ La plantilla está fijada a **Flet 1.0.5**. Si actualizas Flet, vuelve a generar
 
 ### Compartir el APK con tus compañeros
 
-Copia `build\apk\sapardobank.apk` (o el nombre que genere Flet) y compártelo por Drive, WhatsApp o USB. También puedes renombrarlo a `Sapardobank-1.0.0.apk`.
+Copia `build\apk\sapardobank.apk` (o el nombre que genere Flet) y compártelo por Drive, WhatsApp o USB. También puedes renombrarlo a `Sapardobank-1.1.0.apk`.
 
 - Es un APK **firmado en modo debug**: se instala sin Play Store, pero Android puede mostrar “app no verificada” o pedir permitir la instalación desde esa fuente. Es normal.
 - Cada compañero tiene su **propia base de datos local**. No necesitan tu servidor ni tu token para probar la app con el modo demo.
@@ -162,7 +165,7 @@ Si no defines `LIBRETA_API_TOKEN`, el servidor genera uno en `server_data/token.
 
 ### HTTPS
 
-La app Android tiene `usesCleartextTraffic="false"`. El servidor debe exponerse por **HTTPS** (Caddy, Nginx o un túnel). Para pruebas en red local, `RemoteClient` permite HTTP solo si el host es loopback o una IP privada; en un teléfono real, `127.0.0.1` es el teléfono, no tu PC: usa la IP LAN del PC o HTTPS.
+La app permite HTTP **solo** en la red local; para internet el servidor debe exponerse por **HTTPS** (Caddy, Nginx o un túnel). Para pruebas en red local, `RemoteClient` permite HTTP solo si el host es loopback o una IP privada; en un teléfono real, `127.0.0.1` es el teléfono, no tu PC: usa la IP LAN del PC o HTTPS.
 
 Ejemplo mínimo con Caddy:
 
@@ -198,6 +201,26 @@ No es un firewall del sistema operativo (Android/iOS no lo permiten a una app). 
 - Internet está **desactivado por defecto**.
 
 ---
+
+## Conectar a mi casa
+
+1. En la computadora, abre `run_server.bat`. Anota el token de `server_data/token.txt`.
+2. Deja la PC y el teléfono en la **misma red Wi-Fi**.
+3. En la app: **Ajustes → Conexión → Conectar a mi casa**.
+4. Acepta el **permiso de red** que solicita la app (es un aviso dentro de Sapardobank; Android no pregunta por INTERNET porque es un permiso de instalación).
+5. Sapardobank escanea tu Wi-Fi, encuentra el servidor y te pide el token.
+6. Pulsa **Conectar**. La URL, el token y el permiso quedan guardados; al abrir la app se sincroniza sola.
+
+Si no aparece, revisa que el firewall de Windows permita el puerto **8787** y que el servidor esté escuchando en `0.0.0.0`. También puedes escribir la URL manualmente en el mismo formulario.
+
+## Avisos de actualización
+
+La app consulta la última release pública de GitHub (solo si el usuario dio permiso de red) y, cuando hay una versión nueva, muestra un **pop-up** con:
+
+- **Ahora no**: no vuelve a molestar con esa versión.
+- **Descargar**: abre el APK en el navegador para instalarlo.
+
+Puedes desactivar la búsqueda o probar el aviso desde **Ajustes → Actualizaciones**.
 
 ## Vincular un banco
 
@@ -271,9 +294,9 @@ Invoke-WebRequest -Uri "https://tu-servidor/v1/webhooks/bank" -Method POST -Body
 
 Cada movimiento nuevo se empuja a la app por **SSE** (`/v1/events`) y se refleja en el widget.
 
-### Opción C: modo demo
+### Opción C: modo demo (opcional)
 
-No requiere servidor. En **Cuentas** puedes activar el feed, simular una compra o un ingreso. El feed local genera una compra cada 75 s (configurable) y actualiza la UI y el widget.
+No requiere servidor. Carga la demo desde **Ajustes → Datos → Cargar demostración** o activa el modo demo en **Cuentas**. El feed local genera una compra cada 75 s (configurable) y actualiza la UI y el widget.
 
 ---
 
@@ -301,7 +324,7 @@ Sapardobank/
     providers/plaid.py    /transactions/sync
     static/link.html      portal de Plaid
   android_template/       plantilla Flutter + widget Kotlin
-  tests/                  38 pruebas de dominio, servidor y seguridad
+  tests/                  41 pruebas de dominio, servidor y seguridad
 ```
 
 ### Flujo de datos

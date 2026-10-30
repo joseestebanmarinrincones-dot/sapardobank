@@ -805,8 +805,18 @@ class Ledger:
             for v in views
         ]
 
+    def seed_initial(self) -> bool:
+        from ..core.seed import seed_initial
+
+        return seed_initial(self)
+
+    def load_demo(self) -> bool:
+        from ..core.seed import load_demo_data
+
+        return load_demo_data(self)
+
     def seed_demo(self, target_balances: dict[str, int] | None = None) -> bool:
-        """Datos de ejemplo reproducibles, útiles para el primer arranque."""
+        """Datos de ejemplo reproducibles, útiles para pruebas."""
         from ..core.seed import seed_demo_data
 
         return seed_demo_data(self, target_balances=target_balances)

@@ -18,7 +18,7 @@
         android:name="${applicationName}"
         android:enableOnBackInvokedCallback="true"
         android:allowBackup="false"
-        android:usesCleartextTraffic="false"
+        android:usesCleartextTraffic="true"
         {% if manifest_application -%}{% for k, v in cookiecutter.pyproject.tool.flet.android.manifest_application.items() -%}
         android:{{ k }}="{{ v }}"
         {% endfor -%}{% endif -%}

@@ -14,17 +14,27 @@ def make_ledger(tmp_path):
     return ledger
 
 
-def test_seed_and_balance(tmp_path):
+def test_initial_start_is_clean(tmp_path):
     ledger = make_ledger(tmp_path)
-    ledger.seed_demo()
+    ledger.seed_initial()
     accounts = ledger.accounts()
-    assert len(accounts) == 2
+    assert len(accounts) == 1
+    assert accounts[0].name == "Mi efectivo"
+    assert ledger.count_transactions() == 0
+    assert ledger.total_balance() == 0
+
+
+def test_demo_is_opt_in_and_has_balance(tmp_path):
+    ledger = make_ledger(tmp_path)
+    ledger.seed_initial()
+    ledger.load_demo()
+    accounts = ledger.accounts()
     demo = next(a for a in accounts if a.is_demo)
     cash = next(a for a in accounts if not a.is_demo)
     assert ledger.account_balance(demo) == 1845000
-    assert ledger.account_balance(cash) == 125000
+    assert ledger.account_balance(cash) == 0
     assert ledger.count_transactions() >= 10
-    assert ledger.total_balance() == 1970000
+    assert ledger.total_balance() == 1845000
 
 
 def test_seed_is_idempotent(tmp_path):

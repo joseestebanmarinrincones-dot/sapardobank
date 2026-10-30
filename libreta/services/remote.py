@@ -68,6 +68,82 @@ def validate_server_url(raw: str) -> str:
     return url
 
 
+def local_private_ip() -> str:
+    """IP de la Wi-Fi/LAN actual, sin enviar tráfico real."""
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        sock.settimeout(0.3)
+        sock.connect(("8.8.8.8", 80))
+        ip = sock.getsockname()[0]
+    except OSError as exc:
+        raise RemoteError("No estoy en una red Wi-Fi.") from exc
+    finally:
+        sock.close()
+    try:
+        address = ipaddress.ip_address(ip)
+    except ValueError as exc:
+        raise RemoteError("No pude detectar tu red Wi-Fi.") from exc
+    if not address.is_private:
+        raise RemoteError("Conéctate al Wi-Fi de tu casa, no a datos móviles.")
+    return ip
+
+
+async def discover_local_servers(
+    port: int = 8787,
+    *,
+    timeout: float = 0.65,
+    concurrency: int = 64,
+) -> list[dict]:
+    """Busca servidores Sapardobank en la misma red /24 del teléfono."""
+    ip = await asyncio.to_thread(local_private_ip)
+    octets = ip.split(".")
+    if len(octets) != 4:
+        raise RemoteError("Tu red no es IPv4")
+    base = ".".join(octets[:3])
+    hosts = [f"{base}.{i}" for i in range(1, 255)]
+    if ip not in hosts:
+        hosts.append(ip)
+    hosts.append("127.0.0.1")
+    semaphore = asyncio.Semaphore(concurrency)
+    results: list[dict] = []
+    limits = httpx.Limits(max_connections=concurrency, max_keepalive_connections=0)
+
+    async with httpx.AsyncClient(
+        timeout=httpx.Timeout(timeout),
+        verify=False,
+        follow_redirects=False,
+        limits=limits,
+        headers={"User-Agent": "Sapardobank-Discovery/1.0"},
+    ) as client:
+
+        async def probe(host: str) -> None:
+            async with semaphore:
+                try:
+                    response = await client.get(f"http://{host}:{port}/health")
+                    if response.status_code != 200:
+                        return
+                    data = response.json()
+                except Exception:
+                    return
+            app_name = str(data.get("app") or "")
+            if "Sapardobank" not in app_name and "Libreta" not in app_name:
+                return
+            url = f"http://{host}:{port}"
+            if not any(item["url"] == url for item in results):
+                results.append(
+                    {
+                        "url": url,
+                        "name": app_name,
+                        "version": str(data.get("version") or ""),
+                        "plaid": bool(data.get("plaid")),
+                    }
+                )
+
+        await asyncio.gather(*(probe(host) for host in hosts))
+    return sorted(results, key=lambda item: item["url"])
+
+
+
 class RemoteClient:
     def __init__(self, base_url: str, token: str):
         self.base_url = validate_server_url(base_url)

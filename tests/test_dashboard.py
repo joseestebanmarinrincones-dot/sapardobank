@@ -17,7 +17,7 @@ def make_services(tmp_path):
 def test_dashboard_load(tmp_path):
     ledger, settings, dashboard = make_services(tmp_path)
     data = dashboard.load()
-    assert data.balance_cents == 1970000
+    assert data.balance_cents == 1845000
     assert data.budget_cents == 45000
     assert len(data.week) == 7
     assert len(data.monthly) == 6

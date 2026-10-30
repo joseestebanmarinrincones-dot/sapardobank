@@ -1,6 +1,6 @@
 [project]
 name = "sapardobank"
-version = "1.0.0"
+version = "1.1.0"
 description = "Sapardobank: libreta de gastos diaria, local-first y con banca en tiempo real."
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
@@ -27,6 +27,7 @@ product = "Sapardobank"
 bundle_id = "com.sapardobank.app"
 company = "Sapardobank"
 copyright = "Copyright © 2026 Sapardobank"
+build_number = 2
 icon_background = "#0B3E30"
 
 [tool.flet.app]

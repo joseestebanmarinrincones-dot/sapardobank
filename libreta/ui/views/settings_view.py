@@ -5,6 +5,7 @@ from __future__ import annotations
 import flet as ft
 
 from ...core.money import format_money
+from ... import __version__
 from .. import theme
 from ..theme import alpha, text
 from ..components import (
@@ -141,6 +142,18 @@ def build_settings(app) -> ft.Control:
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 ),
                 ft.Container(height=10),
+                ft.Row(
+                    [
+                        secondary_button(
+                            "Conectar a mi casa",
+                            app.open_home_connect,
+                            icon=ft.Icons.WIFI_ROUNDED,
+                            expand=True,
+                            height=42,
+                        )
+                    ]
+                ),
+                ft.Container(height=8),
                 full_width(url_field),
                 ft.Container(height=8),
                 full_width(token_field),
@@ -169,7 +182,7 @@ def build_settings(app) -> ft.Control:
                     content=ft.Row(
                         [
                             ft.Icon(ft.Icons.SHIELD_OUTLINED, size=16, color=theme.GREEN),
-                            text("Firewall: solo HTTPS, hosts permitidos y webhooks HMAC.", size=9.5, color=theme.MUTED),
+                            text("Red: HTTPS en internet; HTTP solo dentro de tu Wi-Fi.", size=9.5, color=theme.MUTED),
                         ],
                         spacing=6,
                     ),
@@ -356,13 +369,13 @@ def build_settings(app) -> ft.Control:
                         ),
                         ft.Column(
                             [
-                                text("Reiniciar demostración", size=12.5, weight=ft.FontWeight.W_700),
-                                text("Vuelve a cargar los datos de ejemplo.", size=10, color=theme.MUTED),
+                                text("Cargar demostración", size=12.5, weight=ft.FontWeight.W_700),
+                                text("Agrega una cuenta demo con movimientos de ejemplo.", size=10, color=theme.MUTED),
                             ],
                             spacing=1,
                             expand=True,
                         ),
-                        text_button("Reiniciar", app.reset_demo_async, color=theme.CORAL),
+                        text_button("Cargar", app.reset_demo_async, color=theme.GREEN),
                     ],
                     spacing=10,
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
@@ -397,6 +410,49 @@ def build_settings(app) -> ft.Control:
         padding=14,
     )
 
+    update_card = soft_card(
+        ft.Column(
+            [
+                ft.Row(
+                    [
+                        ft.Container(
+                            width=38,
+                            height=38,
+                            border_radius=12,
+                            bgcolor=theme.MINT_SOFT,
+                            alignment=ft.Alignment.CENTER,
+                            content=ft.Icon(ft.Icons.SYSTEM_UPDATE_ROUNDED, size=19, color=theme.GREEN),
+                        ),
+                        ft.Column(
+                            [
+                                text("Buscar actualizaciones", size=12.5, weight=ft.FontWeight.W_700),
+                                text("Avisa con un pop-up cuando haya una versión nueva.", size=9.5, color=theme.MUTED),
+                            ],
+                            spacing=0,
+                            expand=True,
+                        ),
+                        ft.Switch(
+                            value=settings.get_bool("check_updates", True),
+                            active_color=theme.GREEN,
+                            on_change=lambda e: app.set_check_updates(bool(e.control.value)),
+                        ),
+                    ],
+                    spacing=10,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                ),
+                ft.Container(height=6),
+                ft.Row(
+                    [
+                        text(f"Versión instalada: {__version__}", size=9.5, color=theme.MUTED, expand=True),
+                        text_button("Probar aviso", app.test_update_popup),
+                    ]
+                ),
+            ],
+            spacing=0,
+        ),
+        padding=14,
+    )
+
     about = ft.Container(
         padding=ft.Padding.only(left=4, right=4, top=8),
         content=ft.Column(
@@ -404,7 +460,7 @@ def build_settings(app) -> ft.Control:
                 ft.Row(
                     [
                         text("Sapardobank", size=12, weight=ft.FontWeight.W_700, color=theme.GREEN),
-                        text("v1.0.0", size=10, color=theme.MUTED),
+                        text(f"v{__version__}", size=10, color=theme.MUTED),
                     ],
                     spacing=6,
                 ),
@@ -414,7 +470,7 @@ def build_settings(app) -> ft.Control:
                     size=10,
                     color=theme.MUTED,
                 ),
-                text("Iconos y fuentes con licencia abierta. Datos de demostración, no reales.", size=9, color=theme.MUTED_LIGHT),
+                text("Iconos y fuentes con licencia abierta. Tus datos locales son tuyos; la demo es opcional.", size=9, color=theme.MUTED_LIGHT),
             ],
             spacing=3,
         ),
@@ -477,6 +533,10 @@ def build_settings(app) -> ft.Control:
                         section_header("Datos", "Tu información, portable"),
                         ft.Container(height=8),
                         data_card,
+                        ft.Container(height=16),
+                        section_header("Actualizaciones", "Mantente al día"),
+                        ft.Container(height=8),
+                        update_card,
                         ft.Container(height=20),
                         about,
                         ft.Container(height=28),

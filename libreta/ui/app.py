@@ -22,7 +22,9 @@ from ..services.export import ExportService
 from ..services.ledger import Ledger
 from ..services.remote import RemoteClient, RemoteError, SyncManager, validate_server_url
 from ..services.settings import SettingsService
+from ..services.updates import UpdateChecker, UpdateInfo, is_newer
 from ..services.widget import WidgetService
+from .. import __version__
 from . import theme
 from .theme import alpha, text
 from .components import primary_button, text_button
@@ -31,6 +33,7 @@ from .sheets import (
     AccountFormSheet,
     AddTransactionSheet,
     ConnectBankSheet,
+    HomeConnectSheet,
     TutorialSheet,
     WidgetSheet,
 )
@@ -52,11 +55,12 @@ class LibretaApp:
         self.settings = SettingsService(self.db)
         theme.apply_palette(self.settings.get("theme_palette", "esmeralda"))
         theme.configure_page(page)
-        self.ledger.seed_demo()
+        self.ledger.seed_initial()
         self.dashboard = DashboardService(self.ledger, self.settings)
         self.demo_feed = DemoFeed(self.ledger, self.settings)
         self.widget_service = WidgetService(self.dashboard, self.settings)
         self.exports = ExportService(self.ledger)
+        self.update_checker = UpdateChecker()
         self.sync = SyncManager(
             self.ledger,
             self.settings,
@@ -86,6 +90,7 @@ class LibretaApp:
         page.run_task(self._remote_loop)
         page.run_task(self._startup)
         page.run_task(self._tutorial_startup)
+        page.run_task(self._update_loop)
         page.run_task(self._refresh_widget_background)
 
     # ------------------------------------------------------------------ shell
@@ -222,6 +227,59 @@ class LibretaApp:
     def open_tutorial(self, event=None) -> None:
         TutorialSheet(self).open()
 
+    def open_home_connect(self, event=None) -> None:
+        self.request_network_permission(lambda: HomeConnectSheet(self).open())
+
+    def request_network_permission(self, on_allow=None, on_deny=None) -> None:
+        if self.settings.get_bool("network_permission_granted", False):
+            if on_allow:
+                on_allow()
+            return
+        dialog: ft.AlertDialog
+
+        def allow(event=None):
+            self.settings.set("network_permission_granted", True)
+            try:
+                self.page.pop_dialog()
+            except Exception:
+                pass
+            self.refresh()
+            if on_allow:
+                on_allow()
+            self.page.run_task(self._check_updates_once)
+
+        def deny(event=None):
+            try:
+                self.page.pop_dialog()
+            except Exception:
+                pass
+            if on_deny:
+                on_deny()
+
+        dialog = ft.AlertDialog(
+            modal=True,
+            icon=ft.Icon(ft.Icons.WIFI_ROUNDED, color=theme.GREEN, size=30),
+            title=text("Permiso de red", size=19, display=True),
+            content=text(
+                "Sapardobank necesita permiso para usar la red de tu casa y buscar el servidor local. "
+                "Solo se conecta a la dirección que configures; no lee tus fotos, contactos ni otros datos.",
+                size=11.5,
+                color=theme.MUTED,
+            ),
+            actions=[
+                ft.TextButton("Ahora no", on_click=deny),
+                ft.FilledButton(
+                    "Permitir",
+                    on_click=allow,
+                    style=ft.ButtonStyle(bgcolor=theme.GREEN, color=theme.WHITE),
+                ),
+            ],
+            actions_alignment=ft.MainAxisAlignment.END,
+            inset_padding=ft.Padding.all(18),
+            bgcolor=theme.CARD,
+        )
+        self.page.show_dialog(dialog)
+
     async def _tutorial_startup(self) -> None:
         """Muestra el tutorial una vez, sin bloquear el arranque."""
         await asyncio.sleep(1.2)
@@ -256,6 +314,8 @@ class LibretaApp:
         self.show_snack(f"Tema {label} aplicado")
 
     def set_demo_live(self, value: bool) -> None:
+        if value and not self.ledger.demo_account():
+            self.ledger.load_demo()
         self.settings.set("demo_live", value)
         self.refresh()
         self.show_snack("Feed de demostración activado" if value else "Feed de demostración pausado")
@@ -304,16 +364,29 @@ class LibretaApp:
         self.show_snack("Perfil guardado")
 
     def set_internet(self, value: bool) -> None:
-        if value and not (self.settings.get("api_url") and self.settings.get("api_token")):
+        if not value:
+            self._apply_internet(False)
+            return
+        if not (self.settings.get("api_url") and self.settings.get("api_token")):
             self.settings.set("internet_enabled", False)
             self.show_snack("Configura el servidor y el token primero", error=True)
             self.refresh()
             return
+        if not self.settings.get_bool("network_permission_granted", False):
+            self.request_network_permission(
+                lambda: self._apply_internet(True),
+                lambda: self._apply_internet(False),
+            )
+            return
+        self._apply_internet(True)
+
+    def _apply_internet(self, value: bool) -> None:
         self.settings.set("internet_enabled", value)
         self.refresh()
         self.show_snack("Internet activado" if value else "Internet desactivado")
         if value:
             self.page.run_task(self._kick_sync)
+            self.page.run_task(self._check_updates_once)
 
     def save_server_async(self) -> None:
         form = self.server_form
@@ -330,10 +403,22 @@ class LibretaApp:
             return
         self.settings.set("api_url", url)
         self.settings.set("api_token", token)
-        self.settings.set("internet_enabled", True)
         self.refresh()
-        self.show_snack("Servidor guardado; probando conexión…")
-        self.page.run_task(self._test_and_sync, url, token)
+
+        def begin():
+            self.settings.set("internet_enabled", True)
+            self.refresh()
+            self.show_snack("Servidor guardado; probando conexión…")
+            self.page.run_task(self._test_and_sync, url, token)
+
+        def deny():
+            self.settings.set("internet_enabled", False)
+            self.refresh()
+
+        if self.settings.get_bool("network_permission_granted", False):
+            begin()
+        else:
+            self.request_network_permission(begin, deny)
 
     def test_server_async(self) -> None:
         form = self.server_form
@@ -341,7 +426,9 @@ class LibretaApp:
             return
         raw_url = (form["url"].value or "").strip()
         token = (form["token"].value or "").strip()
-        self.page.run_task(self._test_server, raw_url, token)
+        self.request_network_permission(
+            lambda: self.page.run_task(self._test_server, raw_url, token)
+        )
 
     async def _test_server(self, raw_url: str, token: str) -> None:
         try:
@@ -381,8 +468,20 @@ class LibretaApp:
 
     def sync_now_async(self, event=None) -> None:
         if not self.settings.get_bool("internet_enabled", False):
-            self.show_snack("Activa el acceso a internet en Ajustes", error=True)
+            if not (self.settings.get("api_url") and self.settings.get("api_token")):
+                self.show_snack("Configura el servidor o usa Conectar a mi casa", error=True)
+                return
+            self.request_network_permission(
+                lambda: self._enable_and_sync(),
+                None,
+            )
             return
+        self.show_snack("Sincronizando…")
+        self.page.run_task(self._kick_sync)
+
+    def _enable_and_sync(self) -> None:
+        self.settings.set("internet_enabled", True)
+        self.refresh()
         self.show_snack("Sincronizando…")
         self.page.run_task(self._kick_sync)
 
@@ -402,6 +501,109 @@ class LibretaApp:
             result = await asyncio.to_thread(self.sync.sync_now)
             if result.ok:
                 self.refresh()
+
+    # ------------------------------------------------------------ actualizaciones
+
+    def set_check_updates(self, value: bool) -> None:
+        self.settings.set("check_updates", value)
+        self.refresh()
+        if value:
+            self.page.run_task(self._check_updates_once)
+
+    async def _check_updates_once(self) -> None:
+        if not (
+            self.settings.get_bool("check_updates", True)
+            and self.settings.get_bool("network_permission_granted", False)
+            and self.settings.get_bool("tutorial_seen", False)
+        ):
+            return
+        try:
+            info = await asyncio.to_thread(self.update_checker.check)
+        except Exception:
+            return
+        if not info:
+            return
+        if not is_newer(info.version, __version__):
+            return
+        if self.settings.get("skipped_version", "") == info.version:
+            return
+        self._show_update_dialog(info)
+
+    async def _update_loop(self) -> None:
+        await asyncio.sleep(15)
+        while True:
+            await self._check_updates_once()
+            await asyncio.sleep(6 * 3600)
+
+    def _show_update_dialog(self, info: UpdateInfo, *, test: bool = False) -> None:
+        def later(event=None):
+            if not test:
+                self.settings.set("skipped_version", info.version)
+            try:
+                self.page.pop_dialog()
+            except Exception:
+                pass
+
+        def download(event=None):
+            if not test:
+                self.settings.set("skipped_version", info.version)
+            try:
+                self.page.pop_dialog()
+            except Exception:
+                pass
+            self.open_url(info.download_url)
+
+        dialog = ft.AlertDialog(
+            modal=True,
+            icon=ft.Icon(ft.Icons.SYSTEM_UPDATE_ROUNDED, color=theme.GREEN, size=32),
+            title=text("Nueva versión disponible", size=20, display=True),
+            content=ft.Column(
+                [
+                    text(
+                        f"Sapardobank {info.version} ya está disponible. La tienes instalada: {__version__}.",
+                        size=12,
+                        color=theme.MUTED,
+                    ),
+                    ft.Container(height=6),
+                    text(
+                        "Descarga el APK nuevo y ábrelo para actualizar. Tus datos locales se conservan.",
+                        size=11,
+                        color=theme.MUTED,
+                    ),
+                ],
+                spacing=0,
+                tight=True,
+            ),
+            actions=[
+                ft.TextButton("Ahora no", on_click=later),
+                ft.FilledButton(
+                    "Descargar",
+                    on_click=download,
+                    style=ft.ButtonStyle(bgcolor=theme.GREEN, color=theme.WHITE),
+                ),
+            ],
+            actions_alignment=ft.MainAxisAlignment.END,
+            inset_padding=ft.Padding.all(18),
+            bgcolor=theme.CARD,
+        )
+        self.page.show_dialog(dialog)
+
+    def test_update_popup(self, event=None) -> None:
+        current = [int(x) for x in __version__.split(".") if x.isdigit()]
+        while len(current) < 3:
+            current.append(0)
+        current[2] += 1
+        fake = ".".join(str(x) for x in current)
+        self._show_update_dialog(
+            UpdateInfo(
+                version=fake,
+                tag=f"v{fake}",
+                download_url="https://github.com/joseestebanmarinrincones-dot/sapardobank/releases/latest",
+                release_url="https://github.com/joseestebanmarinrincones-dot/sapardobank/releases/latest",
+                notes="Vista previa del aviso de actualización.",
+            ),
+            test=True,
+        )
 
     # ------------------------------------------------------------------ datos
 
@@ -430,22 +632,27 @@ class LibretaApp:
     def reset_demo_async(self, event=None) -> None:
         dialog = ft.AlertDialog(
             modal=True,
-            title=text("¿Reiniciar la demostración?", size=18, display=True),
-            content=text("Se borran los movimientos actuales y se cargan de nuevo los datos de ejemplo.", size=12, color=theme.MUTED),
+            title=text("¿Cargar datos de demostración?", size=18, display=True),
+            content=text(
+                "Se agregará una cuenta demo con movimientos de ejemplo. Tus cuentas y movimientos reales no se tocan.",
+                size=12,
+                color=theme.MUTED,
+            ),
             actions=[
                 ft.TextButton("Cancelar", on_click=lambda e: self.page.pop_dialog()),
-                ft.FilledButton("Reiniciar", on_click=lambda e: self._do_reset_demo(), style=ft.ButtonStyle(bgcolor=theme.GREEN, color=theme.WHITE)),
+                ft.FilledButton(
+                    "Cargar demo",
+                    on_click=lambda e: self._do_load_demo(),
+                    style=ft.ButtonStyle(bgcolor=theme.GREEN, color=theme.WHITE),
+                ),
             ],
         )
         self.page.show_dialog(dialog)
 
-    def _do_reset_demo(self) -> None:
+    def _do_load_demo(self) -> None:
         self.page.pop_dialog()
-        self.ledger.db.execute("DELETE FROM transactions")
-        self.ledger.db.execute("DELETE FROM accounts")
-        set_setting(self.ledger.db, "seeded", "0")
-        self.ledger.seed_demo()
-        self.after_change("Demostración reiniciada")
+        self.ledger.load_demo()
+        self.after_change("Datos de demostración cargados")
 
     def confirm_wipe(self, event=None) -> None:
         dialog = ft.AlertDialog(
@@ -544,7 +751,11 @@ class LibretaApp:
 
     async def _startup(self) -> None:
         await asyncio.sleep(1)
-        if self.settings.get_bool("internet_enabled", False) and self.settings.get("api_url"):
+        if (
+            self.settings.get_bool("internet_enabled", False)
+            and self.settings.get_bool("network_permission_granted", False)
+            and self.settings.get("api_url")
+        ):
             result = await asyncio.to_thread(self.sync.sync_now)
             if result.ok:
                 self.refresh()
@@ -589,7 +800,7 @@ class LibretaApp:
         last_sync = 0.0
         while True:
             try:
-                enabled = self.settings.get_bool("internet_enabled", False)
+                enabled = self.settings.get_bool("internet_enabled", False) and self.settings.get_bool("network_permission_granted", False)
                 url = self.settings.get("api_url")
                 token = self.settings.get("api_token")
                 current = (enabled, url, token)

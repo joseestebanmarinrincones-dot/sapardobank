@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import date, datetime, time, timedelta
 
 import flet as ft
@@ -10,6 +11,7 @@ from ..core.catalog import ACCOUNT_ICONS
 from ..core.dates import human_day, now_iso
 from ..core.models import Account, TransactionView
 from ..core.money import MoneyError, format_money, parse_amount_to_cents
+from ..services.remote import RemoteClient, RemoteError, discover_local_servers, validate_server_url
 from . import theme
 from .theme import alpha, text
 from .components import (
@@ -949,6 +951,237 @@ class ConnectBankSheet:
         self.app.open_account_form()
 
 
+class HomeConnectSheet:
+    """Busca el servidor Sapardobank en la Wi-Fi de casa y lo deja configurado."""
+
+    def __init__(self, app):
+        self.app = app
+        self.url = ""
+        self.server_list = ft.Column(spacing=6)
+        self.status = text("Buscando el servidor en tu Wi-Fi…", size=10.5, color=theme.MUTED)
+        self.progress = ft.ProgressBar(
+            value=None,
+            color=theme.GREEN,
+            bgcolor=theme.MINT_SOFT,
+            bar_height=4,
+            border_radius=4,
+        )
+        self.url_field = input_field(
+            "Se llena al buscar el servidor",
+            value="",
+            prefix_icon=ft.Icons.LAN_ROUNDED,
+            keyboard_type=ft.KeyboardType.URL,
+        )
+        self.token_field = input_field(
+            "Token de server_data/token.txt",
+            value=self.app.settings.get("api_token", ""),
+            prefix_icon=ft.Icons.KEY_ROUNDED,
+            password=True,
+        )
+        self.connect_button: ft.Control | None = None
+
+    def open(self) -> None:
+        form = ft.Column(
+            [
+                ft.Row(
+                    [
+                        ft.Column(
+                            [
+                                text("Conectar a mi casa", size=23, display=True),
+                                text("Mismo Wi-Fi, sin escribir la IP.", size=10.5, color=theme.MUTED),
+                            ],
+                            spacing=1,
+                            expand=True,
+                        ),
+                        ft.Container(
+                            content=ft.Icon(ft.Icons.CLOSE_ROUNDED, size=20, color=theme.INK),
+                            width=36,
+                            height=36,
+                            border_radius=18,
+                            bgcolor=theme.CARD_WARM,
+                            alignment=ft.Alignment.CENTER,
+                            on_click=lambda e: _close(self.app),
+                            ink=True,
+                        ),
+                    ]
+                ),
+                ft.Container(height=12),
+                ft.Container(
+                    content=ft.Row(
+                        [
+                            ft.Icon(ft.Icons.WIFI_ROUNDED, size=20, color=theme.GREEN),
+                            ft.Column(
+                                [
+                                    text("Enciende el servidor en tu computadora", size=11.5, weight=ft.FontWeight.W_700),
+                                    text(
+                                        "Ejecuta run_server.bat, deja la PC y el teléfono en el mismo Wi-Fi y permite el puerto 8787 en el firewall de Windows.",
+                                        size=9.5,
+                                        color=theme.MUTED,
+                                    ),
+                                ],
+                                spacing=1,
+                                expand=True,
+                            ),
+                        ],
+                        spacing=10,
+                        vertical_alignment=ft.CrossAxisAlignment.START,
+                    ),
+                    bgcolor=theme.MINT_SOFT,
+                    border_radius=14,
+                    padding=12,
+                ),
+                ft.Container(height=12),
+                ft.Row(
+                    [
+                        primary_button("Buscar en mi Wi-Fi", self._search_click, icon=ft.Icons.WIFI_FIND_ROUNDED, expand=True, height=44),
+                    ]
+                ),
+                ft.Container(height=8),
+                self.progress,
+                ft.Container(height=4),
+                self.status,
+                ft.Container(height=6),
+                self.server_list,
+                ft.Container(height=8),
+                self.url_field,
+                ft.Container(height=8),
+                self.token_field,
+                ft.Container(height=6),
+                text(
+                    "El token está en server_data/token.txt de la computadora. No lo compartas.",
+                    size=9.5,
+                    color=theme.MUTED,
+                ),
+                ft.Container(height=14),
+                ft.Row(
+                    [
+                        primary_button("Conectar", self._connect_click, icon=ft.Icons.LINK_ROUNDED, expand=True, height=48),
+                    ]
+                ),
+                ft.Container(height=10),
+            ],
+            spacing=0,
+            scroll=ft.ScrollMode.AUTO,
+            expand=True,
+        )
+        sheet = ft.BottomSheet(
+            content=ft.Container(
+                content=form,
+                padding=ft.Padding.only(left=20, right=20, top=8, bottom=12),
+                height=_sheet_height(self.app),
+            ),
+            bgcolor=theme.CARD,
+            show_drag_handle=True,
+            draggable=True,
+            use_safe_area=True,
+        )
+        self.app.page.show_dialog(sheet)
+        self.app.page.run_task(self._search)
+
+    def _search_click(self, event=None) -> None:
+        self.app.page.run_task(self._search)
+
+    async def _search(self) -> None:
+        self.progress.visible = True
+        self.status.value = "Buscando el servidor en tu Wi-Fi…"
+        self.server_list.controls = []
+        self.app.page.update()
+        try:
+            servers = await discover_local_servers()
+        except Exception as exc:
+            self.progress.visible = False
+            self.status.value = str(exc)
+            self.status.color = theme.CORAL
+            self.app.page.update()
+            return
+        self.progress.visible = False
+        if not servers:
+            self.status.value = (
+                "No encontré el servidor. Verifica que run_server.bat esté abierto y que el firewall permita el puerto 8787."
+            )
+            self.status.color = theme.CORAL
+            self.app.page.update()
+            return
+        self.status.value = f"Encontré {len(servers)} servidor{'es' if len(servers) != 1 else ''}. Elige uno:"
+        self.status.color = theme.GREEN
+        self.server_list.controls = [self._server_card(item) for item in servers]
+        self.url = servers[0]["url"]
+        self.url_field.value = self.url
+        self.app.page.update()
+
+    def _server_card(self, item: dict) -> ft.Container:
+        return ft.Container(
+            content=ft.Row(
+                [
+                    ft.Icon(ft.Icons.DNS_ROUNDED, size=18, color=theme.GREEN),
+                    ft.Column(
+                        [
+                            text(item.get("name") or "Sapardobank Server", size=11.5, weight=ft.FontWeight.W_700),
+                            text(item["url"], size=10, color=theme.MUTED),
+                        ],
+                        spacing=0,
+                        expand=True,
+                    ),
+                    text(item.get("version") or "", size=9.5, color=theme.MUTED),
+                ],
+                spacing=9,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            ),
+            padding=10,
+            border_radius=12,
+            border=ft.Border.all(1, theme.LINE),
+            bgcolor=theme.CARD_WARM,
+            on_click=lambda e, value=item["url"]: self._select_server(value),
+            ink=True,
+        )
+
+    def _select_server(self, url: str) -> None:
+        self.url = url
+        self.url_field.value = url
+        self.app.page.update()
+
+    def _connect_click(self, event=None) -> None:
+        self.app.page.run_task(self._connect)
+
+    async def _connect(self) -> None:
+        raw_url = (self.url_field.value or self.url or "").strip()
+        token = (self.token_field.value or "").strip()
+        if not raw_url:
+            self.status.value = "Primero busca el servidor o escribe su URL."
+            self.status.color = theme.CORAL
+            self.app.page.update()
+            return
+        try:
+            url = validate_server_url(raw_url)
+            if not token:
+                raise RemoteError("Pega el token de server_data/token.txt")
+        except RemoteError as exc:
+            self.status.value = str(exc)
+            self.status.color = theme.CORAL
+            self.app.page.update()
+            return
+        self.status.value = "Probando conexión…"
+        self.status.color = theme.MUTED
+        self.app.page.update()
+        try:
+            client = RemoteClient(url, token)
+            info = await asyncio.to_thread(client.health)
+        except Exception as exc:
+            self.status.value = str(exc)
+            self.status.color = theme.CORAL
+            self.app.page.update()
+            return
+        self.app.settings.set("api_url", url)
+        self.app.settings.set("api_token", token)
+        self.app.settings.set("internet_enabled", True)
+        self.app.settings.set("network_permission_granted", True)
+        _close(self.app)
+        self.app.refresh()
+        self.app.show_snack(f"Conectado a {info.get('app', 'tu casa')} · sincronizando")
+        self.app.page.run_task(self.app._kick_sync)
+        self.app.page.run_task(self.app._check_updates_once)
+
+
 class TutorialSheet:
     """Tutorial corto de conexión: internet, banco y primer movimiento."""
 
@@ -964,8 +1197,8 @@ class TutorialSheet:
             "icon": ft.Icons.WIFI_ROUNDED,
             "color": theme.BLUE,
             "title": "Conecta tu internet",
-            "body": "Ve a Ajustes → Conexión. Pega la URL HTTPS de tu servidor Sapardobank y el token que está en server_data/token.txt. Guarda y prueba.",
-            "detail": "El APK solo acepta HTTPS en redes públicas. En local, usa la IP de tu computadora y un túnel HTTPS.",
+            "body": "Ve a Ajustes → Conexión → Conectar a mi casa. Acepta el permiso de red; Sapardobank buscará el servidor en tu Wi-Fi y te pedirá el token de server_data/token.txt.",
+            "detail": "En tu Wi-Fi se permite HTTP local; fuera de casa usa siempre HTTPS. El firewall sigue bloqueando destinos no permitidos en el servidor.",
         },
         {
             "icon": ft.Icons.LINK_ROUNDED,
@@ -1126,6 +1359,10 @@ class TutorialSheet:
         except Exception:
             pass
         self.app.show_snack("Tutorial completado · puedes repetirlo en Ajustes → Conexión")
+        try:
+            self.app.page.run_task(self.app._check_updates_once)
+        except Exception:
+            pass
 
 
 class WidgetSheet:
