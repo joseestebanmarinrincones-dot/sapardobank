@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.flet/
+
+# Flet
+build/
+*.log
+*.db
+*.db-wal
+*.db-shm
+server_data/
+.env
+.env.*
+!.env.example
+
+# Artefactos locales
+dist/
+shots/
+screenshot*.png
+web_run.log
+desktop.log
+
+# Sistema
+Thumbs.db
+desktop.ini

@@ -1,0 +1,76 @@
+[project]
+name = "sapardobank"
+version = "1.0.0"
+description = "Sapardobank: libreta de gastos diaria, local-first y con banca en tiempo real."
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+authors = [{ name = "Sapardobank" }]
+dependencies = [
+    "flet==1.0.5",
+    "pillow>=11.0.0",
+    "httpx>=0.28.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.0",
+    "playwright>=1.50.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.flet]
+org = "com.sapardobank"
+product = "Sapardobank"
+bundle_id = "com.sapardobank.app"
+company = "Sapardobank"
+copyright = "Copyright © 2026 Sapardobank"
+icon_background = "#0B3E30"
+
+[tool.flet.app]
+path = "."
+module = "main"
+exclude = [
+    ".venv",
+    ".git",
+    "__pycache__",
+    "*.pyc",
+    ".pytest_cache",
+    "build",
+    "server_data",
+    "server",
+    "android_template",
+    "shots",
+    "tools",
+    "tests",
+    "dist",
+    "*.log",
+    "*.db",
+    ".env",
+    ".env.*",
+    "!.env.example",
+    "screenshot*.png",
+    "build_android.bat",
+    "run_server.bat",
+    "run_windows.bat",
+    "README.md",
+    "requirements.txt",
+    "pyproject.toml",
+]
+
+[tool.flet.splash]
+color = "#F4F1E9"
+dark_color = "#0B3E30"
+
+[tool.flet.boot_screen.flet]
+theme_mode = "light"
+bgcolor_light = "#F4F1E9"
+spinner_color_light = "#0F6B54"
+spinner_size = 28
+startup_message = "Abriendo Sapardobank…"
+
+[tool.flet.android]
+min_sdk_version = 24
+target_sdk_version = 35

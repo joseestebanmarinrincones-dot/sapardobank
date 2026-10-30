@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="libreta_widget_name">Sapardobank · Gastos de hoy</string>
+    <string name="libreta_widget_description">Sapardobank: tus gastos de hoy, presupuesto y último movimiento.</string>
+    <string name="libreta_widget_brand">SAPARDOBANK</string>
+    <string name="libreta_widget_today">GASTOS DE HOY</string>
+    <string name="libreta_widget_refresh">Actualizar widget de Sapardobank</string>
+</resources>
